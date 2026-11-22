@@ -1,87 +1,68 @@
-# TreeVision 
+# TreeVision — type de couverture forestière à partir de variables cartographiques
 
-**TreeVision** utilise des techniques de machine et deep learning pour identifier, à partir de variables cartographiques seules, le type de couverture forestière d’une cellule de 30 × 30 m dans la forêt nationale Roosevelt (Colorado).
+Projet d'école (2025). Classer chaque parcelle de 30 × 30 m de la forêt nationale de Roosevelt (Colorado) dans l'un des 7 types de couverture forestière, à partir de variables cartographiques seules (altitude, pente, distances, ombrage, type de sol). Quatre modèles comparés sur le même jeu de test, avec un fort déséquilibre entre classes.
 
-## Table des matières
-1. [Présentation](#présentation)
-2. [Données](#données)
-3. [Structure du projet](#structure-du-projet)
-4. [Installation & Usage](#installation--usage)
-5. [Modèles entraînés](#modèles-entraînés)
-6. [Enjeux & résultats](#enjeux--résultats)
-7. [Licence](#licence)
+## Résultats
+
+Jeu de test : 116 203 parcelles (20 % du jeu, tirées au hasard, jamais vues pendant l'entraînement ni le réglage). Chiffres lus dans les sorties de [`model.ipynb`](model.ipynb).
+
+| Modèle | Exactitude | F1 macro | Rappel macro |
+|---|---|---|---|
+| Régression logistique (SMOTE) | 0,59 | 0,51 | 0,71 |
+| Random Forest (SMOTE) | 0,80 | 0,72 | 0,74 |
+| **XGBoost (SMOTE)** | **0,82** | **0,78** | 0,83 |
+| Réseau de neurones dense (poids de classes) | **0,82** | 0,77 | **0,90** |
+
+Ce que ces chiffres montrent :
+
+- **XGBoost et le réseau de neurones font jeu égal** en exactitude (0,818 contre 0,818). XGBoost a le meilleur F1 macro ; le réseau a le meilleur rappel macro, c'est-à-dire qu'il retrouve mieux les classes rares, au prix de plus de fausses alertes sur ces classes.
+- Le déséquilibre est fort : la classe la plus fréquente compte environ 100 fois plus de parcelles que la plus rare. Le F1 macro, qui donne le même poids à chaque classe, est donc plus parlant que l'exactitude.
+- La régression logistique reste loin derrière : les frontières entre types de forêt ne sont pas linéaires dans ces variables.
+
+![Répartition des classes](https://github.com/user-attachments/assets/ce2b50c6-76f9-4663-bb21-57b0dec52446)
+
+## Méthode
+
+- **Préparation** ([`cleaning.ipynb`](cleaning.ipynb)) : découpage 80 / 20 avant toute transformation, puis transformation Yeo-Johnson et mise à l'échelle robuste ajustées sur l'entraînement seul et appliquées au test.
+- **Modèles classiques** : SMOTE placé dans le pipeline, donc appliqué seulement aux plis d'entraînement de la validation croisée (5 plis stratifiés) ; hyperparamètres choisis par recherche aléatoire.
+- **Réseau de neurones** : 3 couches denses (512, 256, 128) avec normalisation et dropout, poids de classes inversement proportionnels aux effectifs, arrêt anticipé sur un jeu de validation tiré de l'entraînement.
+- **Suivi** : paramètres et métriques enregistrés dans MLflow.
+
+## Limites
+
+- Recherche d'hyperparamètres courte (3 tirages par modèle) : les écarts entre modèles peuvent en partie venir du réglage.
+- Un seul découpage train / test, sans intervalle de confiance : l'égalité entre XGBoost et le réseau ne peut pas être départagée.
+- Les 54 variables sont des variables cartographiques ; aucune image n'est utilisée malgré le nom du projet.
+- La métrique « f1_score » affichée pendant l'entraînement du réseau est une version binaire inadaptée au cas à 7 classes ; les chiffres du tableau viennent du rapport de classification de scikit-learn sur le jeu de test.
 
 ## Données
-- **Source** : USFS Region 2 Resource Information System  
-- **Fichiers** :  
-  - `cover_data.csv` (dataset brut)  
-  - `train_data.csv`,`test_data.csv` (issus de cover_data.csv)
 
-| Nom de la variable                                   | Type de donnée | Unité / Mesure             | Description                                                  |
-|-------------------------------------------------------|----------------|----------------------------|--------------------------------------------------------------|
-| Élévation                                             | Quantitatif    | Mètres                     | Élévation en mètres                                          |
-| Orientation                                           | Quantitatif    | Degrés (azimut)            | Orientation en degrés azimutaux                              |
-| Pente                                                 | Quantitatif    | Degrés                     | Pente en degrés                                              |
-| Distance horizontale à l’hydrologie                   | Quantitatif    | Mètres                     | Distance horizontale jusqu’aux plus proches plans d’eau      |
-| Distance verticale à l’hydrologie                     | Quantitatif    | Mètres                     | Distance verticale jusqu’aux plus proches plans d’eau        |
-| Distance horizontale aux routes                       | Quantitatif    | Mètres                     | Distance horizontale jusqu’à la route la plus proche         |
-| Indice d’ombrage à 9 h                                | Quantitatif    | Indice (0–255)             | Indice d’ombrage à 9 h, solstice d’été                       |
-| Indice d’ombrage à midi                               | Quantitatif    | Indice (0–255)             | Indice d’ombrage à midi, solstice d’été                      |
-| Indice d’ombrage à 15 h                               | Quantitatif    | Indice (0–255)             | Indice d’ombrage à 15 h, solstice d’été                      |
-| Distance horizontale aux points d’allumage d’incendie | Quantitatif    | Mètres                     | Distance horizontale jusqu’aux points d’allumage d’incendie  |
-| Zone sauvage (4 colonnes binaires)                    | Qualitatif     | 0 (absence) / 1 (présence) | Désignation de la zone sauvage                               |
-| Type de sol (40 colonnes binaires)                    | Qualitatif     | 0 (absence) / 1 (présence) | Désignation du type de sol                                   |
-| Type de couverture forestière (7 catégories)          | Entier         | 1 – 7                      | Désignation du type de couverture forestière                 |
+- **Source** : jeu *Covertype* (Blackard et Dean), issu du Resource Information System de la région 2 du US Forest Service, disponible sur le [UCI Machine Learning Repository](https://archive.ics.uci.edu/dataset/31/covertype).
+- **Fichier** : `cover_data.csv`, 581 012 parcelles, 54 variables explicatives et la classe.
 
+| Variable | Unité | Description |
+|---|---|---|
+| Altitude | m | Altitude de la parcelle |
+| Orientation | degrés (azimut) | Direction de la pente |
+| Pente | degrés | Inclinaison |
+| Distances horizontale et verticale à l'eau | m | Jusqu'au plan d'eau le plus proche |
+| Distance aux routes | m | Jusqu'à la route la plus proche |
+| Ombrage à 9 h, midi et 15 h | indice 0-255 | Au solstice d'été |
+| Distance aux points de départ d'incendie | m | Jusqu'au plus proche |
+| Zone sauvage | 4 colonnes binaires | Zone de la forêt |
+| Type de sol | 40 colonnes binaires | Classification des sols |
+| Classe (variable prévue) | 1 à 7 | Type de couverture forestière |
 
-## Structure du projet
-├── cleaning.ipynb # EDA & preprocessing
+## Reproduire
 
-├── models.ipynb # Entraînement des modèles 
-
-├── cover_data.csv 
-
-├── train_data.csv 
-
-├── test_data.csv
-
-├── requirements.txt
-
-## Installation & Usage
 ```bash
-git clone https://…/TreeVision.git
+git clone https://github.com/FlavioDurante/TreeVision.git
 cd TreeVision
 pip install -r requirements.txt
-
+mlflow ui --port 5000          # dans un autre terminal
+jupyter lab                    # cleaning.ipynb (crée train_data.csv et test_data.csv), puis model.ipynb
 ```
-## Extraction train_data et test_data
-
-Executer le code dans cleaning.ipynb
-
-# Lancer MLflow UI
-```bash
-mlflow ui --port 5000
-```
-Ouvre ensuite cleaning.ipynb puis models.ipynb dans JupyterLab.
-
-## Modèles entraînés
-Logistic Regression
-
-XGBoost
-
-Random Forest
-
-Neural Network (TensorFlow + Keras)
-
-## Enjeux & résultats
-Fort déséquilibre entre classes
-
-![image_1](https://github.com/user-attachments/assets/ce2b50c6-76f9-4663-bb21-57b0dec52446)
-
-
-Impact sur la Logistic Regression → faible recall sur les classes minoritaires.
-
-Meilleure performance obtenue avec Neural Network : précision globale de 81 %, F1-score moyen de 90%.
 
 ## Licence
-Ce projet est sous licence MIT.
+
+Code sous licence MIT, voir [`LICENSE`](LICENSE). Données : UCI Machine Learning Repository, licence CC BY 4.0.
